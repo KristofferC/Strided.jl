@@ -117,6 +117,7 @@ end
             A1c = copy(A1)
             A2c = copy(A2)
             GC.@preserve A1c A2c begin
+
                 B1 = SV(A1c)
                 B2 = SV(A2c)
 
@@ -229,23 +230,27 @@ end
     @testset for T in (Float32, Float64, ComplexF32, ComplexF64)
         R1, R2, R3 = rand(T, (10,)), rand(T, (10,10)), rand(T, (10,10,10))
         GC.@preserve R1 R2 R3 begin
-            B1 = SV(R1)
-            B2 = permutedims(SV(R2), randperm(2))
-            B3 = permutedims(SV(R3), randperm(3))
-            A1 = convert(Array, B1)
-            A2 = convert(Array{T}, B2)
-            A3 = convert(Array{T,3}, B3)
-
-            @test @inferred(B1 .+ sin.(B2 .- 3)) ≈ A1 .+ sin.(A2 .- 3)
-            @test @inferred(B2' .* B3 .- Ref(0.5)) ≈ A2' .* A3 .- Ref(0.5)
-            @test @inferred(B2' .* B3 .- max.(abs.(B1),real.(B3))) ≈ A2' .* A3 .- max.(abs.(A1),real.(A3))
-
-            @test (B1 .+ sin.(B2 .- 3)) isa StridedView
-            @test (B2' .* B3 .- Ref(0.5)) isa StridedView
-            @test (B2' .* B3 .- max.(abs.(B1),real.(B3))) isa StridedView
-            @test (B2' .* A3 .- max.(abs.(B1),real.(B3))) isa Array
+            test_broadcast(R1, R2, R3)
         end
     end
+end
+
+@noinline function test_broadcast(R1, R2, R3)
+    B1 = SV(R1)
+    B2 = permutedims(SV(R2), randperm(2))
+    B3 = permutedims(SV(R3), randperm(3))
+    A1 = convert(Array, B1)
+    A2 = convert(Array{T}, B2)
+    A3 = convert(Array{T,3}, B3)
+
+    @test @inferred(B1 .+ sin.(B2 .- 3)) ≈ A1 .+ sin.(A2 .- 3)
+    @test @inferred(B2' .* B3 .- Ref(0.5)) ≈ A2' .* A3 .- Ref(0.5)
+    @test @inferred(B2' .* B3 .- max.(abs.(B1),real.(B3))) ≈ A2' .* A3 .- max.(abs.(A1),real.(A3))
+
+    @test (B1 .+ sin.(B2 .- 3)) isa StridedView
+    @test (B2' .* B3 .- Ref(0.5)) isa StridedView
+    @test (B2' .* B3 .- max.(abs.(B1),real.(B3))) isa StridedView
+    @test (B2' .* A3 .- max.(abs.(B1),real.(B3))) isa Array
 end
 
 @testset "mapreduce with $SV" for SV in (StridedView, UnsafeStridedView)
@@ -313,18 +318,22 @@ for T1 in (Float32, Float64, Complex{Float32}, Complex{Float64})
             A2c = copy(A2)
             A3c = copy(A3)
             GC.@preserve A1c A2c A3c begin
-                B2 = SV(A2c)
-                B3 = SV(A3c)
+                test_multiplication(A1c, A2c, A3c)
+            end
+        end
+    end
+end
 
-                for op1 in (identity, conj, transpose, adjoint)
-                    for op2 in (identity, conj, transpose, adjoint)
-                        @test op1(A1)*op2(A2) ≈ op1(B1)*op2(B2)
-                        for op3 in (identity, conj, transpose, adjoint)
-                            mul!(op3(B3), op1(B1), op2(B2))
-                            @test B3 ≈ op3(op1(A1)*op2(A2)) # op3 is its own inverse
-                        end
-                    end
-                end
+@noinline function test_multiplication(A1c, A2c, A3c)
+    B2 = SV(A2c)
+    B3 = SV(A3c)
+
+    for op1 in (identity, conj, transpose, adjoint)
+        for op2 in (identity, conj, transpose, adjoint)
+            @test op1(A1)*op2(A2) ≈ op1(B1)*op2(B2)
+            for op3 in (identity, conj, transpose, adjoint)
+                mul!(op3(B3), op1(B1), op2(B2))
+                @test B3 ≈ op3(op1(A1)*op2(A2)) # op3 is its own inverse
             end
         end
     end
@@ -339,18 +348,22 @@ end
     A2c = copy(A2)
     A3c = copy(A3)
     GC.@preserve A1c A2c A3c begin
-        B1 = SV(A1c)
-        B2 = SV(A2c)
-        B3 = SV(A3c)
+        test_multiplication_2(A1c, A2c, A3c)
+    end
+end
 
-        for op1 in (identity, conj, transpose, adjoint)
-            @test op1(A1) == op1(B1)
-            for op2 in (identity, conj, transpose, adjoint)
-                @test op1(A1)*op2(A2) ≈ op1(B1)*op2(B2)
-                for op3 in (identity, conj, transpose, adjoint)
-                    Strided.mul!(op3(B3), op1(B1), op2(B2))
-                    @test B3 ≈ op3(op1(A1)*op2(A2)) # op3 is its own inverse
-                end
+@noinline function test_multiplication_complex(A1c, A2c, A3c)
+    B1 = SV(A1c)
+    B2 = SV(A2c)
+    B3 = SV(A3c)
+
+    for op1 in (identity, conj, transpose, adjoint)
+        @test op1(A1) == op1(B1)
+        for op2 in (identity, conj, transpose, adjoint)
+            @test op1(A1)*op2(A2) ≈ op1(B1)*op2(B2)
+            for op3 in (identity, conj, transpose, adjoint)
+                Strided.mul!(op3(B3), op1(B1), op2(B2))
+                @test B3 ≈ op3(op1(A1)*op2(A2)) # op3 is its own inverse
             end
         end
     end
@@ -365,18 +378,22 @@ end
     A2c = copy(A2)
     A3c = copy(A3)
     GC.@preserve A1c A2c A3c begin
-        B1 = SV(A1c)
-        B2 = SV(A2c)
-        B3 = SV(A3c)
+        test_multiplication_rational(A1c, A2c, A3c)
+    end
+end
 
-        for op1 in (identity, conj, transpose, adjoint)
-            @test op1(A1) == op1(B1)
-            for op2 in (identity, conj, transpose, adjoint)
-                @test op1(A1)*op2(A2) ≈ op1(B1)*op2(B2)
-                for op3 in (identity, conj, transpose, adjoint)
-                    mul!(op3(B3), op1(B1), op2(B2))
-                    @test B3 ≈ op3(op1(A1)*op2(A2)) # op3 is its own inverse
-                end
+@noinline function test_multiplication_rational(A1c, A2c, A3c)
+    B1 = SV(A1c)
+    B2 = SV(A2c)
+    B3 = SV(A3c)
+
+    for op1 in (identity, conj, transpose, adjoint)
+        @test op1(A1) == op1(B1)
+        for op2 in (identity, conj, transpose, adjoint)
+            @test op1(A1)*op2(A2) ≈ op1(B1)*op2(B2)
+            for op3 in (identity, conj, transpose, adjoint)
+                mul!(op3(B3), op1(B1), op2(B2))
+                @test B3 ≈ op3(op1(A1)*op2(A2)) # op3 is its own inverse
             end
         end
     end
